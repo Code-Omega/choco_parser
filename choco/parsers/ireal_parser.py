@@ -216,7 +216,7 @@ class ChoCoTune(Tune):
         's's are necessary.
         ----------
         measures : list of str
-            A list of measures, eacnh encoded as a string.
+            A list of measures, each encoded as a string.
         Returns
         -------
         new_measures : list of str
@@ -427,8 +427,6 @@ class ChoCoTune(Tune):
         # Remove alternative chords, but keep space in-betweens
         chord_string = re.sub(r'\([^)]*\)', ' ', chord_string)
         # deal with s, l, and f (fermata)
-        # # remove l if at starts of measures (by default all chords are large)
-        # chord_string = re.sub(r'\|l', '|', chord_string)
         # separate l (for 'large'), unless it's part of an alt chord
         chord_string = re.sub(r'(?<!a)l(?!t)', 'l ', chord_string)
         # separate s (for 'small'), unless it's part of a sus chord
@@ -571,6 +569,7 @@ def extract_annotations_from_tune(tune: ChoCoTune):
         measure_chords = measure.split()
         chord_dur = measure_beats / len(measure_chords)
         # Creating equal onsets depending on within-measure chords and beats
+        # TODO: either remove timing info (s l f) or use them to determine onsets
         onsets = np.cumsum([0]+[d for d in (len(measure_chords)-1)*[chord_dur]])
         chords += [[m, o, chord_dur, c] for o, c in zip(onsets, measure_chords)]
     # Encapsulating key information as a single annotation
