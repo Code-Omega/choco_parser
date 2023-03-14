@@ -36,17 +36,14 @@ def split_ireal_charts(ireal_url:str):
     """
     Read an iReal URL wrapping custom-encoded chord annotations and split them
     in separate (piece-specific) annotations for further processing.
-
     Parameters
     ----------
     ireal_url : str
         An iReal Pro raw URL wrapping one or more (playlist) chord annotations.
-
     Returns
     -------
     charts : list
         A list of iReal charts, with one element per chart.
-
     """
     ireal_string = urllib.parse.unquote(ireal_url)
     match = re.match(IREAL_RE, ireal_string)
@@ -76,7 +73,6 @@ def mjoin(chord_string:str, *others):
     merged_chords = "".join(merged_chords)
     return merged_chords
 
-
 class ChoCoTune(Tune):
 
     @classmethod
@@ -103,7 +99,6 @@ class ChoCoTune(Tune):
     def _fill_long_repeats(cls, chord_string):
         """
         Replaces long repeats with multiple endings with the appropriate chords.
-
         Parameters
         ----------
         chord_string : str
@@ -118,7 +113,6 @@ class ChoCoTune(Tune):
             two kinds: complex repetitions with different endings (marked by N1,
             N2, etc. symbols), and full bracketed repetitions where an optional
             special comment may be used to indicate the number of repeats.
-
         """
         repeat_match = re.search(r'{(.+?)}', chord_string)
         if repeat_match is None:
@@ -186,12 +180,10 @@ class ChoCoTune(Tune):
         chord_string : str
             The chord string following the extension of long repeats, but still
             containing the coda markers (Q) and segnos (S).
-
         Returns
         -------
         chord_string : str
             The chord string with filled 'D.C. al Coda' and 'D.S. al Coda'
-
         """
         qs = chord_string.count('Q')
         if qs > 2:  # unformatted chart or unsupported XXX
@@ -213,23 +205,45 @@ class ChoCoTune(Tune):
             return new_chord_string
 
         return chord_string
+    
+    @classmethod
+    def _cleanup_chord_size(cls, measures):
+        """
+        Remove chord size symbols that are not helpful:
+        'l' represent large chords occupying a full or half measure,
+        's' represent small chords occupying less, usually quarter measure
+        By default, all chord sizes are large, so only 'l's with preceding
+        's's are necessary.
+        ----------
+        measures : list of str
+            A list of measures, eacnh encoded as a string.
+        Returns
+        -------
+        new_measures : list of str
+            A new list of measures where only matching 's' and 'l' are kept.
+        """
+        new_measures = copy.deepcopy(measures)
+        for i in range(len(new_measures)): # remove l if no s precedes it
+            for l_match in re.finditer('l',new_measures[i]):
+                if new_measures[i][:l_match.start()].find('s') == -1:
+                    new_measures[i] = new_measures[i][:l_match.start()] + \
+                        new_measures[i][l_match.end():]
+        
+        return new_measures
 
     @classmethod
     def _fill_single_double_repeats(cls, measures):
         """
         Replaces 1- and 2-measure repeat symbols with the appropriate chords:
         'x' repeats the previous measure, 'r' repeates the former two. 
-
         Parameters
         ----------
         measures : list of str
             A list of measures, eacnh encoded as a string.
-
         Returns
         -------
         new_measures : list of str
             A new list of measures where 'x' and 'r' are infilled.
-
         """
         pre_measures = []
         for measure in measures:  # marker has its own parenthesis
@@ -254,7 +268,7 @@ class ChoCoTune(Tune):
         for i in range(1, len(new_measures)):
             if new_measures[i] == 'x':  # infill the 1-m repeat from last bar
                 new_measures[i] = cls._remove_markers(new_measures[i-1])
-            elif new_measures[i] == 'r':  # infill the 2-m repeat from last two
+            elif new_measures[i] == 'r':  # infill the 2-m repeat from last two
                 new_measures[i] = cls._remove_markers(new_measures[i-2])
                 assert new_measures[i+1].strip() == "", \
                     f"Illegal repeat: non-empty bar ahead: {new_measures[i+1]}"
@@ -266,27 +280,29 @@ class ChoCoTune(Tune):
     def _fill_slashes(cls, measures):
         """
         Replace slash symbols (encoded as 'p') with the previous chord.
-
         Parameters
         ----------
         measures : list of str
             A list of chord measures (strings) where single and double repeats
             ('x' and 'r') have already been infilled in previous stages.
-
         Returns
         -------
         new_measures : list of str
             A new list of measures with filled slashes.
-
         """
         chord_regex = re.compile(IREAL_CHORD_RE)
 
         for i in range(len(measures)):
             while measures[i].find('p') != -1:
                 slash = measures[i].find('p')
-                if slash == 0:  # slash in 1st position needs measure lookback
+                if (slash == 0):  # slash in 1st position needs measure lookback
                     prev_chord = chord_regex.findall(measures[i - 1])[-1] + " "
                     measures[i] = prev_chord + measures[i][1:]
+                    measures[i] = re.sub(r'^(p+)', prev_chord, measures[i])  # ?
+                elif ((slash == 2) and (measures[i][0] in ('s','l','f'))):
+                    # skipping certain timing annotations
+                    prev_chord = chord_regex.findall(measures[i - 1])[-1] + " "
+                    measures[i] = measures[i][:2] + prev_chord + measures[i][3:]
                     measures[i] = re.sub(r'^(p+)', prev_chord, measures[i])  # ?
                 else:  # repeating a chord that should be found in the same bar
                     prev_chord = chord_regex.findall(measures[i][:slash])[-1]
@@ -302,17 +318,14 @@ class ChoCoTune(Tune):
         separated from the chordal information. This includes, no-chord symbols
         (N.C. encoded as concatenated 'n' markers), extra spaces, end and segno
         symbols, as well as the infill of ovals (e.g. W/C).
-
         Parameters
         ----------
         measures : list of str
             A list of measures at the final stage of pre-processing.
-
         Returns
         -------
         new_measures : list of str
             A new list of measures where all chords are individually readable.
-
         Notes
         -----
             - The time complexity of this function can be fairly improved, as it
@@ -321,7 +334,6 @@ class ChoCoTune(Tune):
                 avoid mixing steps that are conceptually differnent.
             - Filling ovals could deserve to be in a separate function before
                 the current is actually applied; it is not cosmetics, indeed.
-
         """
         # No-chord symbols are padded and capitalised
         new_measures = copy.deepcopy(measures)
@@ -357,7 +369,6 @@ class ChoCoTune(Tune):
         """
         Removes excessive whitespace, unnecessary stuff, empty measures etc.
         and return a more readable string.
-
         Parameters
         ----------
         chord_string: str
@@ -367,7 +378,6 @@ class ChoCoTune(Tune):
         -------
         chord_string: str
             The same string following the preliminary cleaning step.
-
         """
         # Unify symbol for new measure to |
         chord_string = re.sub(r'LZ|K', '|', chord_string)
@@ -403,12 +413,10 @@ class ChoCoTune(Tune):
         Removes certain annotations that are currently not handled/used by the
         parser, including section markers, alternative chords, time signatures,
         as well as those providing little or none musical content.
-
         Notes:
             - In some cases, annotations are concatenated with chords, or other
                 annotations; in these cases, it is better to replace the string
                 with a single space rather than a blank/nil one.
-
         """
         # Unify symbol for new measure to |
         chord_string = re.sub(r'[\[\]]', '|', chord_string)
@@ -418,10 +426,15 @@ class ChoCoTune(Tune):
         chord_string = re.sub(r'(?!<\d+x>)<.*?>', '', chord_string)
         # Remove alternative chords, but keep space in-betweens
         chord_string = re.sub(r'\([^)]*\)', ' ', chord_string)
-        # remove unneeded single l and f (fermata)
-        chord_string = re.sub(r'[lf]', '', chord_string)
-        # Remove s (for 'small), unless it's part of a sus chord
-        chord_string = re.sub(r'(?<!su)s(?!us)', '', chord_string)
+        # deal with s, l, and f (fermata)
+        # # remove l if at starts of measures (by default all chords are large)
+        # chord_string = re.sub(r'\|l', '|', chord_string)
+        # separate l (for 'large'), unless it's part of an alt chord
+        chord_string = re.sub(r'(?<!a)l(?!t)', 'l ', chord_string)
+        # separate s (for 'small'), unless it's part of a sus chord
+        chord_string = re.sub(r'(?<!su)s(?!us)', 's ', chord_string)
+        # separate f (for 'fermata')
+        chord_string = re.sub(r'f', 'f ', chord_string)
         # Remove section markers
         chord_string = re.sub(r'\*\w', '', chord_string)
         # Remove time signatures
@@ -435,17 +448,14 @@ class ChoCoTune(Tune):
         Split a chord string into a list of measures, where empty measures are
         discarded. Cleans up the chord string, removes annotations, and handles
         repeats & codas as well.
-
         Parameters
         ----------
         chord_string: str
             A chord string as originally encoded according to iReal's URL.
-
         Returns
         -------
         measures : list
             A list of measures, with the contents of every measure as a string.
-
         """
         chord_string = cls._cleanup_chord_string(chord_string)
         chord_string = cls._insert_missing_repeat_brackets(chord_string)
@@ -459,6 +469,8 @@ class ChoCoTune(Tune):
         measures = [m.strip() for i, m in enumerate(measures) \
             if m.strip() != '' or measures[i-1].strip() == "r"]  # XXX n.n.
         measures = [m.replace("U", "").strip() for m in measures]
+        # Clean up timing annotations
+        measures = cls._cleanup_chord_size(measures)
         # Infill measure repeat markers (x, r) and within-measure (p)
         measures = cls._fill_single_double_repeats(measures)
         measures = cls._fill_slashes(measures)
@@ -470,19 +482,16 @@ class ChoCoTune(Tune):
     def parse_ireal_url(url):
         """
         Parse iReal charts (URL) into human- and machine-readable formats.
-
         Parameters
         ----------
         url : str
             An url-like string containing one or more tunes.
-
         Returns
         -------
         tunes : list
             A list of ChoCoTune objects resulting from the parsing.
         pname : str
             The name of the playlist if the given charts are bundled.
-
         """
         charts = split_ireal_charts(url)
 
