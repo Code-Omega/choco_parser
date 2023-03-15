@@ -543,7 +543,13 @@ def extract_annotations_from_tune(tune: ChoCoTune):
     chord_dur_weights = {
         'l':1,   # large/long
         's':0.5, # small/short
-        'f':2,   # fermata
+        'f':1,   # fermata
+    }
+
+    chord_dur_modification = {
+        'l':lambda x:x,   # large/long
+        's':lambda x:x,   # small/short
+        'f':lambda x:x*2, # fermata
     }
 
     chords = []  # iterating and timing chords
@@ -552,16 +558,18 @@ def extract_annotations_from_tune(tune: ChoCoTune):
         measure_chords = measure.split()
         chord_names = []
         chord_durs = []
+        dur_mods = []
         for c in measure_chords:
             if c in chord_dur_weights.keys():
                 curr_chord_dur_type = c
             else:
                 chord_names.append(c)
                 chord_durs.append(chord_dur_weights[curr_chord_dur_type])
+                dur_mods.append(chord_dur_modification[curr_chord_dur_type])
         chord_durs = np.array(chord_durs)
         chord_durs = chord_durs/chord_durs.sum() * measure_beats
-        onsets = chord_durs.cumsum()
-        chords += [[m,o,d,c] for o,d,c in zip(onsets,chord_durs,chord_names)]
+        onsets = [0] + list(chord_durs.cumsum())[:-1]
+        chords += [[m,o,dm(d),c] for o,d,dm,c in zip(onsets,chord_durs,dur_mods,chord_names)]
         
     # Encapsulating key information as a single annotation
     assert len(tune.key.split()) == 1, "Single key assumed for iReal tunes"
