@@ -24,6 +24,7 @@ from jams_score import append_listed_annotation, to_jams_timesignature
 from ireal_db import iRealDatabaseHandler
 from utils import create_dir, pad_substring
 
+
 logger = logging.getLogger("choco.ireal_parser")
 
 IREAL_RE = r'irealb://([^"]+)'
@@ -205,31 +206,6 @@ class ChoCoTune(Tune):
             return new_chord_string
 
         return chord_string
-    
-    @classmethod
-    def _cleanup_chord_size(cls, measures):
-        """
-        Remove chord size symbols that are not helpful:
-        'l' represent large chords occupying a full or half measure,
-        's' represent small chords occupying less, usually quarter measure
-        By default, all chord sizes are large, so only 'l's with preceding
-        's's are necessary.
-        ----------
-        measures : list of str
-            A list of measures, each encoded as a string.
-        Returns
-        -------
-        new_measures : list of str
-            A new list of measures where only matching 's' and 'l' are kept.
-        """
-        new_measures = copy.deepcopy(measures)
-        for i in range(len(new_measures)): # remove l if no s precedes it
-            for l_match in re.finditer('l',new_measures[i]):
-                if new_measures[i][:l_match.start()].find('s') == -1:
-                    new_measures[i] = new_measures[i][:l_match.start()] + \
-                        new_measures[i][l_match.end():]
-        
-        return new_measures
 
     @classmethod
     def _fill_single_double_repeats(cls, measures):
@@ -467,8 +443,6 @@ class ChoCoTune(Tune):
         measures = [m.strip() for i, m in enumerate(measures) \
             if m.strip() != '' or measures[i-1].strip() == "r"]  # XXX n.n.
         measures = [m.replace("U", "").strip() for m in measures]
-        # Clean up timing annotations
-        measures = cls._cleanup_chord_size(measures)
         # Infill measure repeat markers (x, r) and within-measure (p)
         measures = cls._fill_single_double_repeats(measures)
         measures = cls._fill_slashes(measures)
@@ -559,19 +533,36 @@ def extract_annotations_from_tune(tune: ChoCoTune):
     - Durations are not consistent when there are time-signature changes.
     - Could include more annotations rather than just chords.
 
+    - Now using some chord duration annotations {s,l,f} as duration weightings
+
     """
     measures = tune.measures_as_strings
     measure_beats = tune.time_signature[0]
     beat_duration = measure_beats*len(measures)
 
+    chord_dur_weights = {
+        'l':1,   # large/long
+        's':0.5, # small/short
+        'f':2,   # fermata
+    }
+
     chords = []  # iterating and timing chords
+    curr_chord_dur_type = 'l' # default chord duration
     for m, measure in enumerate(measures, 1):
         measure_chords = measure.split()
-        chord_dur = measure_beats / len(measure_chords)
-        # Creating equal onsets depending on within-measure chords and beats
-        # TODO: either remove timing info (s l f) or use them to determine onsets
-        onsets = np.cumsum([0]+[d for d in (len(measure_chords)-1)*[chord_dur]])
-        chords += [[m, o, chord_dur, c] for o, c in zip(onsets, measure_chords)]
+        chord_names = []
+        chord_durs = []
+        for c in measure_chords:
+            if c in chord_dur_weights.keys():
+                curr_chord_dur_type = c
+            else:
+                chord_names.append(c)
+                chord_durs.append(chord_dur_weights[curr_chord_dur_type])
+        chord_durs = np.array(chord_durs)
+        chord_durs = chord_durs/chord_durs.sum() * measure_beats
+        onsets = chord_durs.cumsum()
+        chords += [[m,o,d,c] for o,d,c in zip(onsets,chord_durs,chord_names)]
+        
     # Encapsulating key information as a single annotation
     assert len(tune.key.split()) == 1, "Single key assumed for iReal tunes"
     keys = [[1, 1, beat_duration, tune.key]]
